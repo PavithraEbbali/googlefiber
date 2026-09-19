@@ -831,3 +831,73 @@ extended to `.gf-flow`, `.gf-node`, `.gf-text-flow` and `.gf-breathe`, with
 rather than leaving a bare line. 320px: 0px horizontal overflow, no sideways
 scroll, zero overflowing content. `tsc` clean · `eslint` clean · `next build`
 static and warning-free.
+
+---
+
+## [022] Mobile responsiveness pass; repository and Vercel readiness
+
+### Touch targets
+
+Audited every interactive element at 320 / 375 / 768 / 1440. Three failures, all
+fixed:
+
+| Element | Before | After |
+| ------- | ------ | ----- |
+| Footer links (16 of them) | 17px | 40px |
+| Header call CTA | 32px | 44px |
+| Header nav links (tablet and up) | 23px | 47px |
+
+Footer links were bare inline text; they are now `block` with vertical padding,
+and the list gaps were tightened so the column reads at roughly its previous
+density rather than growing. `CallCta` carries a `min-h-11` floor at both sizes.
+
+### Motion budget on phones
+
+Phones do the same compositing work on a fraction of the GPU and on battery, so
+a `max-width: 767px` block trims the expensive parts while keeping the effect:
+
+- blur radius 56px → 38px
+- third aurora blob hidden (18 → 16 layers)
+- two of the four fiber strands hidden (`gf-flow-secondary`)
+- the SVG Gaussian-blur glow on strands and nodes disabled — the costliest part
+
+Live animation count drops from 39 to 35 at phone width, with materially less
+per-layer cost.
+
+### Verified across breakpoints
+
+| Width | Overflow | Layout | Small targets |
+| ----- | -------- | ------ | ------------- |
+| 320px | 0px | 1-col cards, table → stacked | none |
+| 375px | 0px | 1-col cards | none |
+| 768px | 0px | 2-col cards, table restored | none |
+| 1440px | 0px | 3-col cards, 2-col Why Fiber, 3-col flow | none |
+
+Type scales 40 → 68px (h1) and 30 → 40px (h2) across that range.
+
+### Repository
+
+Initialised and pushed to `github.com/PavithraEbbali/googlefiber`, branch `main`,
+commit `74aa352`, 44 files. Remote ref verified to match local HEAD.
+
+Removed before committing: a leftover `wm-after.jpg` scratch file from the
+watermark work, and the five unused create-next-app scaffold SVGs
+(`file/globe/next/vercel/window.svg`) — confirmed zero references first.
+Scanned for credentials; none present and no `.env` files exist.
+
+`gh` CLI is not installed on this machine; the push went through Git Credential
+Manager, which was already configured.
+
+### Vercel
+
+No `vercel.json` is needed — Next.js is auto-detected. `README.md` documents the
+one required environment variable, `NEXT_PUBLIC_SITE_URL`, without which social
+crawlers are handed a placeholder host for the OpenGraph image.
+
+### Known cosmetic build warning
+
+`next build` reports `Unknown at rule: @theme` against `app/globals.css`.
+Turbopack's CSS parser inspects the file before PostCSS hands it to Tailwind v4,
+which owns that at-rule. Verified non-functional by confirming the compiled
+stylesheet contains every brand token, all five keyframe sets, the three
+reduced-motion guards and the 767px mobile guard. No action taken.
