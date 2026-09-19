@@ -1,0 +1,533 @@
+@import "tailwindcss";
+
+/* ==========================================================================
+   GOOGLE FIBER BRAND PALETTE
+   Every hex below is taken from the live stylesheet bundles served by
+   fiber.google.com — no approximations.
+
+   Brand accents : #00BE8E / #00D699 teal-green, #FF7321 orange, #FF72FC magenta
+   Neutral ramp  : #202124, #5F6368, #9AA0A6, #DADCE0, #E0E0E0
+   Tinted surface: #F2FFFB mint, #FFFBF5 cream
+   ========================================================================== */
+
+@theme {
+  /* --- Brand teal-green ramp --- */
+  --color-gf-mint: #a1ffdc;
+  --color-gf-green-bright: #00d699;
+  --color-gf-teal: #00be8e;
+  --color-gf-teal-600: #008064;
+  --color-gf-teal-700: #005d4a;
+
+  /* --- Tier accents (core / home / edge on the official site) --- */
+  --color-gf-orange: #ff7321;
+  --color-gf-magenta: #ff72fc;
+  --color-gf-amber: #fbbc04;
+
+  /* --- Google neutral ramp --- */
+  --color-gf-ink: #1f1f1f;
+  --color-gf-charcoal: #202124;
+  --color-gf-slate: #5f6368;
+  /* Google grey 800 — used where body text sits over photography and the
+     standard grey 700 would fall below a 4.5:1 contrast ratio. */
+  --color-gf-slate-dark: #3c4043;
+  --color-gf-muted: #9aa0a6;
+  --color-gf-line: #dadce0;
+  --color-gf-line-soft: #e0e0e0;
+  --color-gf-surface: #f1f3f4;
+
+  /* --- Tinted surfaces --- */
+  --color-gf-surface-tint: #f2fffb;
+  --color-gf-cream: #fffbf5;
+
+  /* --- Status only --- */
+  --color-gf-blue: #1a73e8;
+  --color-gf-green: #137333;
+  --color-gf-red: #c5221f;
+
+  /* --- Type --- */
+  --font-sans: var(--font-inter), ui-sans-serif, system-ui, -apple-system,
+    "Segoe UI", Roboto, Arial, sans-serif;
+
+  /* --- Motion --- */
+  --ease-gf: cubic-bezier(0.22, 1, 0.36, 1);
+}
+
+/* ==========================================================================
+   BASE
+   ========================================================================== */
+
+html {
+  -webkit-text-size-adjust: 100%;
+  scroll-behavior: auto; /* Lenis owns scrolling; see components/SmoothScroll */
+}
+
+html,
+body {
+  max-width: 100%;
+  overflow-x: clip; /* hard guard against horizontal overflow at 320px */
+}
+
+body {
+  background: #ffffff;
+  color: var(--color-gf-charcoal);
+  font-family: var(--font-sans);
+  font-synthesis-weight: none;
+  text-rendering: optimizeLegibility;
+}
+
+/* Anchor targets clear the sticky header + disclosure bar */
+[id] {
+  scroll-margin-top: 7.5rem;
+}
+
+::selection {
+  background: var(--color-gf-mint);
+  color: var(--color-gf-teal-700);
+}
+
+:where(a, button, input, summary):focus-visible {
+  outline: 2px solid var(--color-gf-teal-600);
+  outline-offset: 2px;
+  border-radius: 6px;
+}
+
+/* ==========================================================================
+   DISPLAY TYPE
+   Tight optical tracking on large headings — the single biggest lever on
+   whether a page reads as premium or as a template.
+   ========================================================================== */
+
+.gf-display {
+  font-weight: 600;
+  letter-spacing: -0.035em;
+  line-height: 1.06;
+}
+
+.gf-eyebrow {
+  font-size: 0.6875rem;
+  font-weight: 600;
+  letter-spacing: 0.14em;
+  text-transform: uppercase;
+}
+
+/* ==========================================================================
+   LENIS
+   ========================================================================== */
+
+html.lenis,
+html.lenis body {
+  height: auto;
+}
+
+.lenis.lenis-smooth {
+  scroll-behavior: auto !important;
+}
+
+.lenis.lenis-stopped {
+  overflow: hidden;
+}
+
+/* ==========================================================================
+   ONE-SHOT ENTRANCE REVEAL
+   ========================================================================== */
+
+.reveal {
+  opacity: 0;
+  transform: translate3d(0, 18px, 0);
+  transition:
+    opacity 0.7s var(--ease-gf),
+    transform 0.7s var(--ease-gf);
+  transition-delay: var(--reveal-delay, 0ms);
+  will-change: opacity, transform;
+}
+
+.reveal[data-revealed="true"] {
+  opacity: 1;
+  transform: none;
+  will-change: auto;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .reveal,
+  .reveal[data-revealed="true"] {
+    opacity: 1;
+    transform: none;
+    transition: none;
+  }
+
+  *,
+  *::before,
+  *::after {
+    animation-duration: 0.001ms !important;
+    transition-duration: 0.001ms !important;
+  }
+}
+
+/* ==========================================================================
+   AMBIENT MOTION
+   Slow, GPU-only (transform / opacity) drift used behind sections. Nothing is
+   scroll-linked and nothing loops faster than 18s, so it reads as ambient light
+   rather than animation. All of it stops under prefers-reduced-motion.
+   ========================================================================== */
+
+@keyframes gf-drift-a {
+  0%,
+  100% {
+    transform: translate3d(0, 0, 0) scale(1);
+  }
+  33% {
+    transform: translate3d(7%, -5%, 0) scale(1.14);
+  }
+  66% {
+    transform: translate3d(-5%, 6%, 0) scale(0.94);
+  }
+}
+
+@keyframes gf-drift-b {
+  0%,
+  100% {
+    transform: translate3d(0, 0, 0) scale(1.05);
+  }
+  40% {
+    transform: translate3d(-8%, 4%, 0) scale(0.92);
+  }
+  75% {
+    transform: translate3d(5%, 7%, 0) scale(1.16);
+  }
+}
+
+@keyframes gf-drift-c {
+  0%,
+  100% {
+    transform: translate3d(0, 0, 0) scale(0.98);
+  }
+  50% {
+    transform: translate3d(6%, 6%, 0) scale(1.2);
+  }
+}
+
+/* Slow push-in on hero photography */
+@keyframes gf-kenburns {
+  from {
+    transform: scale(1.03);
+  }
+  to {
+    transform: scale(1.12);
+  }
+}
+
+/* Light sweep across the offer bar */
+@keyframes gf-shimmer {
+  0% {
+    transform: translateX(-130%) skewX(-18deg);
+  }
+  100% {
+    transform: translateX(260%) skewX(-18deg);
+  }
+}
+
+/* Slow hue pan for gradient rules and borders */
+@keyframes gf-pan {
+  0%,
+  100% {
+    background-position: 0% 50%;
+  }
+  50% {
+    background-position: 100% 50%;
+  }
+}
+
+/* Light travelling along a fiber strand — a dashed stroke whose offset animates,
+   so a short lit segment runs the length of the path. */
+@keyframes gf-flow {
+  from {
+    stroke-dashoffset: var(--flow-from, 2000);
+  }
+  to {
+    stroke-dashoffset: var(--flow-to, 0);
+  }
+}
+
+/* Node blips where strands meet */
+@keyframes gf-node {
+  0%,
+  100% {
+    opacity: 0.25;
+    r: 2.5;
+  }
+  50% {
+    opacity: 0.9;
+    r: 4;
+  }
+}
+
+/* Slow colour travel across gradient-filled text */
+@keyframes gf-text-flow {
+  0%,
+  100% {
+    background-position: 0% 50%;
+  }
+  50% {
+    background-position: 100% 50%;
+  }
+}
+
+/* Breathing glow behind the headline */
+@keyframes gf-breathe {
+  0%,
+  100% {
+    opacity: 0.45;
+    transform: scale(1);
+  }
+  50% {
+    opacity: 0.8;
+    transform: scale(1.07);
+  }
+}
+
+@keyframes gf-pulse-ring {
+  0% {
+    opacity: 0.55;
+    transform: scale(1);
+  }
+  70%,
+  100% {
+    opacity: 0;
+    transform: scale(2.6);
+  }
+}
+
+.gf-kenburns {
+  animation: gf-kenburns 30s ease-in-out infinite alternate;
+  will-change: transform;
+}
+
+/* Aurora blobs */
+/*
+ * Only `transform` animates, so the blurred layer is rasterised once and then
+ * merely moved by the compositor — the blur is not recomputed per frame. The
+ * remaining cost is texture memory, which is why the radius is kept moderate
+ * and the lighter sections use two blobs rather than three.
+ */
+.gf-blob {
+  position: absolute;
+  border-radius: 9999px;
+  filter: blur(56px);
+  will-change: transform;
+  pointer-events: none;
+  /* No `contain: paint` here — it clips painting to the element box and would
+     cut the blur halo off at a hard edge. */
+}
+
+.gf-blob-a {
+  animation: gf-drift-a 22s ease-in-out infinite;
+}
+.gf-blob-b {
+  animation: gf-drift-b 28s ease-in-out infinite;
+}
+.gf-blob-c {
+  animation: gf-drift-c 34s ease-in-out infinite;
+}
+
+.gf-shimmer::after {
+  content: "";
+  position: absolute;
+  inset: 0 auto 0 0;
+  width: 38%;
+  background: linear-gradient(
+    90deg,
+    transparent,
+    rgba(255, 255, 255, 0.34),
+    transparent
+  );
+  animation: gf-shimmer 5.5s ease-in-out infinite;
+  animation-delay: 1.5s;
+  pointer-events: none;
+}
+
+/* Animated brand rule — the teal/orange/magenta hairline, panning slowly */
+.gf-brand-rule {
+  background: linear-gradient(
+    90deg,
+    var(--color-gf-teal),
+    var(--color-gf-orange),
+    var(--color-gf-magenta),
+    var(--color-gf-teal)
+  );
+  background-size: 300% 100%;
+  animation: gf-pan 12s ease-in-out infinite;
+}
+
+.gf-pulse-ring {
+  animation: gf-pulse-ring 2.8s ease-out infinite;
+}
+
+/* --- Fiber flow ---------------------------------------------------------- */
+
+.gf-flow {
+  animation: gf-flow var(--flow-dur, 7s) linear infinite;
+  animation-delay: var(--flow-delay, 0s);
+  will-change: stroke-dashoffset;
+}
+
+.gf-node {
+  animation: gf-node var(--node-dur, 3.4s) ease-in-out infinite;
+  animation-delay: var(--node-delay, 0s);
+}
+
+/* --- Headline ------------------------------------------------------------ */
+
+/*
+ * Every stop in this gradient is a deep teal, so the colour travel never takes
+ * any part of the text above roughly 4:1 against the hero photograph. A lighter
+ * "shine" band was tried and rejected — it dropped glyphs to ~2.5:1 as it swept.
+ */
+.gf-text-flow {
+  background-image: linear-gradient(
+    100deg,
+    #004a3c 0%,
+    #005d4a 25%,
+    #00604e 50%,
+    #005d4a 75%,
+    #004a3c 100%
+  );
+  background-size: 230% 100%;
+  animation: gf-text-flow 9s ease-in-out infinite;
+}
+
+.gf-breathe {
+  animation: gf-breathe 7s ease-in-out infinite;
+  will-change: opacity, transform;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .gf-flow,
+  .gf-node,
+  .gf-text-flow,
+  .gf-breathe {
+    animation: none !important;
+  }
+  /* leave a lit segment visible rather than a bare line */
+  .gf-flow {
+    stroke-dashoffset: 0 !important;
+  }
+}
+
+/* ==========================================================================
+   MOTION BUDGET ON SMALL SCREENS
+   Phones do the same compositing on a fraction of the GPU and on battery. The
+   effect is kept, but the expensive parts are trimmed: a smaller blur radius,
+   one fewer blob per section, and half the fiber strands.
+   ========================================================================== */
+
+@media (max-width: 767px) {
+  .gf-blob {
+    filter: blur(38px);
+  }
+
+  /* third blob is barely perceptible at phone width */
+  .gf-blob-c {
+    display: none;
+  }
+
+  /* keep two strands rather than four */
+  .gf-flow-secondary {
+    display: none;
+  }
+
+  /* the SVG glow filter is the costliest part of the flow */
+  .gf-flow,
+  .gf-node {
+    filter: none !important;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .gf-kenburns,
+  .gf-blob-a,
+  .gf-blob-b,
+  .gf-blob-c,
+  .gf-brand-rule,
+  .gf-pulse-ring,
+  .gf-shimmer::after {
+    animation: none !important;
+  }
+}
+
+/* ==========================================================================
+   SURFACES
+   ========================================================================== */
+
+/* Hero backdrop: mint bloom top-right, cream bloom lower-left, over white. */
+.gf-hero-wash {
+  background:
+    radial-gradient(
+      52rem 34rem at 88% -14%,
+      color-mix(in srgb, var(--color-gf-teal) 20%, transparent),
+      transparent 68%
+    ),
+    radial-gradient(
+      40rem 30rem at -6% 18%,
+      color-mix(in srgb, var(--color-gf-orange) 8%, transparent),
+      transparent 66%
+    ),
+    linear-gradient(180deg, var(--color-gf-surface-tint) 0%, #ffffff 62%);
+}
+
+/* Hairline grid on dark sections */
+.gf-dark-grid {
+  background-image:
+    linear-gradient(
+      to right,
+      color-mix(in srgb, #ffffff 5%, transparent) 1px,
+      transparent 1px
+    ),
+    linear-gradient(
+      to bottom,
+      color-mix(in srgb, #ffffff 5%, transparent) 1px,
+      transparent 1px
+    );
+  background-size: 72px 72px;
+}
+
+/* Elevated glass pill used for the hero availability bar */
+.gf-pill-shadow {
+  box-shadow:
+    0 1px 2px rgba(32, 33, 36, 0.08),
+    0 8px 24px -8px rgba(32, 33, 36, 0.18),
+    0 24px 48px -24px rgba(32, 33, 36, 0.24);
+}
+
+/* Premium card elevation */
+.gf-card-shadow {
+  box-shadow:
+    0 1px 2px rgba(32, 33, 36, 0.05),
+    0 12px 32px -16px rgba(32, 33, 36, 0.24);
+}
+
+.gf-card-shadow-lg {
+  box-shadow:
+    0 2px 4px rgba(32, 33, 36, 0.06),
+    0 24px 56px -24px rgba(32, 33, 36, 0.4);
+}
+
+/* Numerals */
+.gf-tnum {
+  font-variant-numeric: tabular-nums;
+  font-feature-settings: "tnum" 1;
+}
+
+.gf-scroll-x {
+  overflow-x: auto;
+  scrollbar-width: thin;
+  -webkit-overflow-scrolling: touch;
+}
+
+.gf-scroll-x::-webkit-scrollbar {
+  height: 6px;
+}
+
+.gf-scroll-x::-webkit-scrollbar-thumb {
+  background: var(--color-gf-line);
+  border-radius: 999px;
+}

@@ -1,0 +1,833 @@
+# ai.wing — Build Changelog & Architectural Decision Log
+
+Google Fiber Authorized Retailer — one-page landing site.
+Append a new entry for every significant structural change, feature addition or
+architectural decision. Entries are ordered oldest first and never rewritten, so
+any change can be traced and reverted.
+
+---
+
+## [001] Project initialization
+
+**Stack**
+
+- Next.js 16.3.5 (App Router, Turbopack)
+- React 19.2.8
+- TypeScript (strict)
+- Tailwind CSS v4 (CSS-first `@theme`, no `tailwind.config.js`)
+- Lenis — smooth scrolling only
+
+**Scope**
+
+Strict frontend build. No API routes, no database, no server actions, no form
+submission endpoints. The ZIP checker validates input client-side and routes the
+visitor to a phone CTA.
+
+**Note**
+
+`create-next-app` rejects the working directory name `google fiber` (npm package
+names cannot contain spaces). The app was scaffolded under a temporary
+valid-named directory and relocated into the working directory. `package.json`
+carries the sanitized name; the directory name is cosmetic.
+
+---
+
+## [002] Design system — official Google Fiber palette
+
+Brand hex codes were extracted from the live stylesheet at `fiber.google.com`
+rather than guessed. Frequency of use in the shipped CSS decided the hierarchy:
+
+| Token                  | Hex       | Role                                  | Uses on official site |
+| ---------------------- | --------- | ------------------------------------- | --------------------- |
+| `--color-gf-teal`      | `#00BE8E` | Primary brand accent, all primary CTAs| 86                    |
+| `--color-gf-slate`     | `#5F6368` | Secondary text (Google grey 700)      | 67                    |
+| `--color-gf-charcoal`  | `#202124` | Dark surfaces, headings (Google 900)  | 50                    |
+| `--color-gf-mint`      | `#A1FFDC` | Light accent on dark surfaces         | 3                     |
+| `--color-gf-teal-600`  | `#008064` | CTA hover                             | 8                     |
+| `--color-gf-teal-700`  | `#005D4A` | CTA active, eyebrow text              | 8                     |
+| `--color-gf-surface`   | `#F5F5F5` | Neutral section surface               | 8                     |
+| `--color-gf-line`      | `#E2E2E2` | Hairline borders                      | 4                     |
+| `--color-gf-red`       | `#EA4335` | Form validation only                  | 2                     |
+
+**Finding:** Google Fiber's current brand accent is teal `#00BE8E`, not Google
+blue. Blue (`#174EA6`) appears only incidentally. The site is therefore built on
+the teal/charcoal system, which is what an auditor comparing against
+`fiber.google.com` will expect to see.
+
+**Typography:** Inter via `next/font/google`, self-hosted at build time. Closest
+open metric match to Google Sans, which is not publicly licensed.
+
+**Motion budget** (deliberately small):
+
+- Lenis smooth scroll — `duration: 1.05`, disabled under
+  `prefers-reduced-motion`, and it owns anchor scrolling so the sticky header
+  offset is respected.
+- `components/Reveal.tsx` — one-shot fade + 18px rise on first viewport entry,
+  then the IntersectionObserver disconnects. Nothing is scroll-linked.
+- Hover states — a 1px card lift and a border/shadow shift.
+
+No WebGL, no 3D spirals, no animated assembly diagrams, no looping animation.
+
+---
+
+## [003] Centralized data architecture — `lib/content.ts`
+
+Single source of truth. **No `.tsx` file contains a hard-coded price, speed,
+plan name, fee or disclosure figure.**
+
+`PlanItem` is the universal pricing model, implemented to the required shape:
+`id`, `name`, `serviceLine`, `speedDown`, `speedUp`, `price`, `cents`,
+`promoQualifier`, `equipmentFee`, `dataPolicy`, `contractTerm`, `features`,
+`isPopular` — plus four optional presentation fields (`tagline`, `router`,
+`installFee`, `badge`).
+
+**Cascade paths** — editing one `price` in `lib/content.ts` updates:
+
+1. The plan card lockup — `PlanCard` → `PriceLockup`
+2. The hero price anchor — `leadPlan` resolves from `isPopular`
+3. The fine-print comparison table — rows map over `plans`
+4. Footer legal disclosure — `disclosures.pricing` interpolates `startingPrice`
+5. Page metadata and OpenGraph description in `app/layout.tsx`
+6. The hero subline, which interpolates the slowest and fastest fiber tiers
+
+**Derived selectors** (nothing downstream recomputes these):
+`plansFor()`, `activeServiceLines()`, `leadPlan`, `startingPrice`,
+`topSpeedGig`, `formatSpeed()`.
+
+---
+
+## [004] Universal price lockup — `components/PriceLockup.tsx`
+
+One component renders every price on the site. Signature: `<PriceLockup plan={plan} />`.
+
+Layout is a baseline-anchored flex row: muted `$`, dominant integer, muted
+cents, muted `/mo`. Three size variants keep the dominant integer inside the
+required 2.5rem–3.5rem band:
+
+- `hero` — 3.25rem → 3.5rem
+- `card` — 2.75rem → 3rem
+- `compact` — 2.5rem
+
+`invert` renders the lockup on dark surfaces. A plan with no `price` renders a
+"Pricing by address" state instead, and `CallCta` independently switches that
+card's button to "Call for pricing".
+
+Accessibility: the split spans are `aria-hidden` and a single `sr-only`
+sentence (`"$100.00 per month"`) is announced instead.
+
+---
+
+## [005] Section hierarchy — data-driven, order enforced by the model
+
+`SERVICE_LINE_ORDER` in `lib/content.ts` fixes the canonical merchandising
+sequence: **fiber → cable → bundle → tv → mobile → phone**.
+
+`app/page.tsx` maps `activeServiceLines()`, which filters that array to lines
+carrying at least one plan. The order is therefore a property of the data, not
+of hand-written JSX — a section cannot drift out of position.
+
+**Service line audit against fiber.google.com:**
+
+| Line   | Offered natively? | Decision | Evidence                                                              |
+| ------ | ----------------- | -------- | --------------------------------------------------------------------- |
+| Fiber  | Yes               | RENDER   | 1 Gig $70 · 3 Gig $100 · 8 Gig $150                                    |
+| Cable  | No                | OMITTED  | Google Fiber operates a 100% fiber network; there is no cable plant.   |
+| Bundle | Yes               | RENDER   | Internet + Home Phone on one bill; rate is internet + $20, no fee.     |
+| TV     | No                | OMITTED  | Fiber TV was retired in 2022. See decision note below.                 |
+| Mobile | No                | OMITTED  | No GFiber wireless product. Google Fi is a separate Alphabet product.  |
+| Phone  | Yes               | RENDER   | Google Fiber Phone, $20/mo, unlimited U.S. and Canada calling.         |
+
+**Decision note — TV section omitted.** Google Fiber retired its linear TV
+product and now only points customers to third-party streaming services, which
+bill separately and are not sold by a Google Fiber retailer. Rendering a TV
+section would require either a card with no price and no orderable product, or a
+"call to ask" placeholder — both explicitly disallowed. The governing rule
+("omit any service line not offered natively") wins over the illustrative
+mention of streaming partners. Reversing this is a data-only change: add
+`serviceLine: 'tv'` plans to `lib/content.ts` and the section returns in
+position 4 automatically.
+
+---
+
+## [006] Compliance constraints applied
+
+| Constraint                              | Implementation                                                                                     |
+| --------------------------------------- | -------------------------------------------------------------------------------------------------- |
+| Persistent retailer disclosure          | `TopDisclosureBar` — no dismiss control, no client state, inside the sticky chrome so it never scrolls away. |
+| Hero keeps ZIP checker **and** call CTA | `Hero` renders `ZipChecker` and a `CallCta` side by side in the same action card.                    |
+| CTA label rules                         | `CallCta` derives the label: priced plan → "Call to order"; unpriced plan → "Call for pricing". Raw phone numbers appear as button text only in the header and footer, which pass an explicit `label`. |
+| `data-call-cta` on every `tel:` link    | Every phone link on the site is rendered by `CallCta`, which always emits the attribute. No raw `<a href="tel:">` exists anywhere else. |
+| No support routing to the carrier       | No copy anywhere instructs a visitor to contact Google Fiber for billing, outages or support.        |
+| No competitor bashing / self-deprecation| Copy is descriptive only. No "we are only an ordering channel" framing, no county-line claims.        |
+| No Broadband Facts label links          | None present.                                                                                        |
+| No date stamps                          | No "Pricing observed …" string. Footer copyright carries no year, so nothing can go stale.            |
+| No "is this the official site?" FAQ     | All eight FAQ entries cover installation, speed, equipment and contract terms only.                   |
+| No empty sections                       | `ServiceSection` returns `null` for any line with zero plans.                                         |
+
+**Accuracy:** every plan name, price, speed, router model and inclusion is taken
+from Google Fiber's own published product data. No promotional offer is invented
+— the hero promo highlight uses Google Fiber's real price-stability positioning
+("the same price since 2012" / a rate that does not step up after year one)
+rather than a fabricated limited-time discount.
+
+**Placeholder:** `contact.phoneDisplay` / `contact.phoneHref` are set to
+`(888) 555-0100`, in the reserved fictional 555-01xx range so staging cannot
+dial a live party. Replace both fields in `lib/content.ts` when the sales line
+is issued — that one edit updates the header, hero, every plan card, the ZIP
+result panel, the How-It-Works CTA and the footer.
+
+---
+
+## [007] Component inventory
+
+```
+app/
+  layout.tsx            Fonts, metadata, sticky chrome, Lenis mount, footer
+  page.tsx              Composition; maps activeServiceLines() in canonical order
+  globals.css           Tailwind v4 @theme, brand tokens, reveal + Lenis CSS
+lib/
+  content.ts            SINGLE SOURCE OF TRUTH
+components/
+  SmoothScroll.tsx      Lenis + anchor interception (client)
+  Reveal.tsx            One-shot entrance reveal (client)
+  PriceLockup.tsx       Universal price renderer
+  CallCta.tsx           Every tel: link; owns data-call-cta and label rules
+  Logo.tsx              Original retailer wordmark in the GFiber palette
+  icons.tsx             Inline SVG set, no icon dependency
+  TopDisclosureBar.tsx  Persistent disclosure
+  Header.tsx            Sticky header, anchor nav, call button (client)
+  Hero.tsx              Eyebrow, H1, subline, ZIP + call, trust chips, price anchor
+  ZipChecker.tsx        Client-side ZIP validation, routes to phone (client)
+  PlanCard.tsx          Stacked and wide variants
+  ServiceSection.tsx    Generic service-line renderer; null when empty
+  FinePrintGrid.tsx     Table at md+, stacked cards below
+  WhyFiber.tsx          Dark features section
+  HowItWorks.tsx        Three-step ordering section
+  Faq.tsx               Native <details> accordion, no client JS
+  Footer.tsx            Dark footer, 8 mandatory legal links, disclosures
+```
+
+Client components are limited to the four that genuinely need browser APIs
+(`SmoothScroll`, `Reveal`, `Header`, `ZipChecker`). Everything else is a server
+component, so almost no JavaScript ships for the content itself.
+
+---
+
+## [008] Responsive and accessibility guarantees
+
+- `html, body { overflow-x: clip }` plus `min-w-0` on every grid child — no
+  horizontal overflow at 320px.
+- The fine-print table is replaced by stacked cards below `md` rather than
+  scrolled sideways.
+- `scroll-margin-top: 7.5rem` on `[id]` clears the disclosure bar + header.
+- Native `<details>` FAQ — keyboard and screen-reader behaviour from the browser.
+- Skip link to `#plans`.
+- Visible focus ring on every interactive element, on light and dark surfaces.
+- All motion collapses under `prefers-reduced-motion: reduce`, including Lenis.
+
+---
+
+## [009] Bundles refactored to composed pricing
+
+**Problem found during verification.** Bundle plans stored their monthly rate as
+a literal (`price: 90`) and restated their parts in text (`"1 Gig at $70 plus
+Home Phone at $20"`). Changing the 1 Gig rate in one place would therefore have
+left every bundle containing it showing a stale price — a real break in the
+single-source-of-truth guarantee.
+
+**Fix.** A bundle is now a composition, not a price. `BundleSpec` names an
+internet plan id plus add-on plan ids; `composeBundle()` derives the monthly
+rate, the cents, both speeds, the data policy, the contract term, the install
+line and the "X at $70 plus Y at $20" qualifier from the referenced plans.
+`requirePlan()` throws at module load if a spec points at an unknown id, so a
+typo fails the build instead of shipping a wrong price.
+
+Catalogue assembly is now:
+
+```
+fiberPlans ─┐
+            ├─ basePlans ─→ composeBundle() ─→ bundlePlans
+phonePlans ─┘                                        │
+                                                     ▼
+            plans = [...fiberPlans, ...bundlePlans, ...phonePlans]
+```
+
+---
+
+## [010] 320px header fix
+
+**Problem found during verification.** At a 320px viewport the header's call
+button extended to 372px — 52px past the viewport. `overflow-x: clip` meant the
+page could not be scrolled sideways, so the defect surfaced as the primary CTA
+being visually cut off rather than as a scrollbar.
+
+**Fix.** Below the `sm` breakpoint the logo mark drops to 28px, the wordmark and
+retailer qualifier step down a size, and the header call button loses its icon
+and tightens to `px-3 py-2 text-xs`. The button's right edge now lands at 304px
+inside a 320px viewport, clearing the 16px gutter. Nothing changes at `sm` and
+above.
+
+---
+
+## [011] Verification results
+
+Measured against the running app, not assumed.
+
+**Cascade test.** Changed `core-1-gig.price` from 70 to 77 in `lib/content.ts`
+and confirmed every consumer followed, then reverted:
+
+| Consumer                         | Before   | After    |
+| -------------------------------- | -------- | -------- |
+| 1 Gig plan card                  | $70      | $77      |
+| 1 Gig + Home Phone (composed)     | $90      | $97      |
+| Bundle qualifier text            | at $70   | at $77   |
+| Fine-print table rows            | $70.00   | $77.00   |
+| Footer disclosure `startingPrice`| $70/mo   | $77/mo   |
+
+**Compliance audit** (grep over the rendered HTML):
+
+- 12 `tel:` links, **0** missing `data-call-cta`
+- 10 "Call to order" buttons, 0 "Call for pricing" (every plan carries a price)
+- Raw phone number as button text appears exactly **2** times — header and
+  footer only
+- 8/8 mandatory legal links present
+- Persistent disclosure bar present
+- 0 hits for: "Pricing observed", "Broadband Facts", "official site",
+  "ordering channel", "county lines", "contact Google Fiber"
+- No hardcoded price, speed or plan name in any `.tsx` file
+
+**Layout.** At 320x720: `documentScrollWidth` 320, horizontal overflow 0px, zero
+non-decorative elements past the viewport edge.
+
+**Section order in the DOM:** plans → bundles → phone → fine-print → why-fiber →
+how-it-works → faq. `#cable`, `#tv` and `#mobile` are absent, as intended.
+
+**Toolchain:** `tsc --noEmit` clean · `eslint` clean · `next build` succeeds,
+route `/` prerendered as static content.
+
+---
+
+## [012] Open items for the operator
+
+1. **Replace the placeholder phone number.** Edit `contact.phoneDisplay` and
+   `contact.phoneHref` in `lib/content.ts`. One edit updates all 12 `tel:` links.
+2. **Build the eight legal pages.** The footer links to `/legal/*` routes that do
+   not exist yet, so they currently 404. Content for these is a legal
+   deliverable, not a frontend one.
+3. **Confirm market pricing.** Google Fiber also publishes market-variant tiers
+   (Half Gig $55, 2 Gig $100, 5 Gig $125) in some footprints. The site ships the
+   national 1/3/8 Gig lineup. Add variants to `plans` if a market needs them.
+4. **Serviceability lookup.** The ZIP form is intentionally frontend-only and
+   routes to an agent. Wiring a real coverage API would be a backend change.
+
+---
+
+## [013] Palette corrected against the official CSS bundles
+
+The first pass sampled colours from inline styles in the fiber.google.com HTML.
+This pass pulled the three linked stylesheet bundles (~1.47 MB) and re-derived
+the palette, which surfaced brand accents the HTML scrape had missed entirely.
+
+**Newly identified and now in use:**
+
+| Token                     | Hex       | Role on the official site              |
+| ------------------------- | --------- | -------------------------------------- |
+| `--color-gf-orange`       | `#FF7321` | core / home tier accent                |
+| `--color-gf-magenta`      | `#FF72FC` | edge tier accent                       |
+| `--color-gf-green-bright` | `#00D699` | vivid accent                           |
+| `--color-gf-line`         | `#DADCE0` | Google border grey (replaced #E2E2E2)  |
+| `--color-gf-surface-tint` | `#F2FFFB` | mint surface (replaced #F6FAF7)        |
+| `--color-gf-cream`        | `#FFFBF5` | warm surface                           |
+| `--color-gf-muted`        | `#9AA0A6` | Google grey 500                        |
+| `--color-gf-surface`      | `#F1F3F4` | neutral surface (replaced #F5F5F5)     |
+
+**Primary CTA shade changed.** Buttons moved from `#00BE8E` to **`#008064`**,
+which is the shade Google Fiber uses for its own primary buttons. `#00BE8E` is
+retained as the vivid accent for icons, tier marks and gradients.
+
+**Tier colour-coding added.** `PlanItem` gained an optional `accent` field
+(`teal | orange | magenta`), mirroring Google Fiber's own product colour-coding.
+It drives a 3px top bar and a dot beside the plan name. Composed bundles inherit
+the accent of their internet plan, so the coding stays consistent automatically:
+
+- 1 Gig → `#FF7321` · 3 Gig → `#00BE8E` · 8 Gig → `#FF72FC`
+
+A hairline in all three accents (`teal → orange → magenta`) now runs across the
+top of the hero price card, the Why Fiber section and the footer.
+
+---
+
+## [014] Hero rebuilt; copy raised to a professional register
+
+**Hero.** The bordered form card around the availability checker read as a
+generic template. It is gone. The checker is now a single elevated pill —
+the same pattern Google Fiber uses for its own address bar — with an sr-only
+label, an inline pin icon and a solid `#008064` submit. Supporting changes:
+larger display scale (up to 3.75rem), a mint/orange radial wash, refined trust
+markers, and a restyled price card with the tier hairline.
+
+**Removed at the operator's request:**
+
+- The `Call to order` button and the "Prefer to talk it through…" helper
+  paragraph inside the hero availability card.
+- The "Order by phone / Mon-Fri 8am-9pm ET" block in the navbar.
+
+> The hero still satisfies the hard requirement to carry **both** a ZIP checker
+> and a call button: the ZIP pill remains, and the `Call to order` button on the
+> lead-plan price card is untouched. Verified live — hero contains one
+> `data-call-cta` link plus the postal-code input. The hours line survives in
+> the footer, which was not in scope for removal.
+
+**Copy rewritten to a professional register** (all in `lib/content.ts`):
+
+| Before                                          | After                                       |
+| ----------------------------------------------- | ------------------------------------------- |
+| Multi-gig fiber, at a price that holds.         | Multi-gigabit fiber, engineered for the modern home. |
+| Internet and home phone together                | Complete home connectivity                  |
+| Hardware, fees and what is actually included    | Transparent pricing, itemized               |
+| What a pure fiber network actually changes      | The advantage of end-to-end fiber           |
+| Three steps to a scheduled install              | From availability check to installation     |
+| Questions we get before an order                | Common questions, answered                  |
+
+Supporting sublines were rewritten to match, and the fiber/phone section
+subheadings were tightened.
+
+**New shared component — `SectionHeading.tsx`.** Every section now renders its
+eyebrow, heading and subheading through one component, so the accent rule,
+display size (40px), tracking (-1.4px) and 112px vertical rhythm are identical
+down the page. Verified live across all seven sections.
+
+---
+
+## [015] Tailwind v4 important-modifier bug
+
+`Header` and `ZipChecker` sized their CTAs with v3-style important prefixes
+(`!px-3`, `sm:!px-5`, `!py-3`). **Tailwind v4 moved the important modifier to a
+suffix (`px-3!`)**, so every one of those classes was dead — the buttons were
+silently falling back to base padding.
+
+Fixed at the source rather than by rewriting the classes: `CallCta` now owns a
+`size` prop (`sm | md`) and no caller passes sizing overrides. Confirmed at
+320px after a hard reload — header CTA computes 12px padding and 12px type,
+right edge at 304px inside a 320px viewport, 16px gutter intact, zero
+horizontal overflow and zero non-decorative elements past the edge.
+
+**Re-audit after the redesign:** 11 `tel:` links with 0 missing
+`data-call-cta`; 9 "Call to order" and 0 "Call for pricing"; raw phone as button
+text exactly twice (header + footer); 8/8 legal links; all forbidden strings 0;
+section order unchanged; `#cable`, `#tv`, `#mobile` still absent. Link and CTA
+counts dropped by one each because the hero CTA removal above was intentional.
+`tsc` clean · `eslint` clean · `next build` static.
+
+---
+
+## [016] Hero re-architected as a centred stack; spacing tightened
+
+**The split layout was the problem.** The previous hero used the common
+"copy left / product card right" arrangement. That pattern — not the styling of
+the card — is what read as a generic template.
+
+Checked against the references: Google Fiber's own hero, bestfiberinternet.us
+and kineticfiber.us all lead with a **single centred column**. The hero now
+follows that: centred eyebrow, headline, subline, availability pill and trust
+markers, with no floating panel.
+
+**The price anchor moved to a horizontal band.** The dark lead-plan card is
+gone. The `<PriceLockup />` requirement is now carried by a slim full-width
+lockup below the trust markers: tier dot, plan name, price, `Call to order`,
+and a tinted promo row beneath. It stacks to a column below `sm`.
+
+`PriceLockup` gained `showQualifier` so the band does not repeat the promo line
+that its own footer row already states.
+
+> The hero still carries **both** required elements — verified live: one
+> postal-code input and one `data-call-cta` link.
+
+**Spacing.** Two separate gaps were called out and both were measured before
+and after:
+
+| Gap                                  | Before | After |
+| ------------------------------------ | ------ | ----- |
+| Navbar bottom → hero eyebrow          | 112px  | 58px  |
+| Hero price band → plans heading       | 152px  | 80px  |
+
+Hero padding went to `pt-10 pb-10 / sm:pt-12 sm:pb-12 / lg:pt-14`. Every
+section container moved from `py-20 sm:py-24 lg:py-28` to
+`py-14 sm:py-16 lg:py-20`. Hero height dropped 825px → 739px.
+
+Most of the dead space in the second screenshot came from the old grid being
+`items-center` with a tall right-hand card, which left the shorter left column
+padded out. Removing the card removed that entirely.
+
+**Copy, second revision:**
+
+| Before                                               | After                                        |
+| ---------------------------------------------------- | -------------------------------------------- |
+| Multi-gigabit fiber, engineered for the modern home. | Pure fiber. Symmetrical speed. Fixed pricing. |
+| Transparent pricing, itemized                        | Equipment, fees and inclusions                |
+
+**Verified:** 320px → 0px horizontal overflow, zero non-decorative offenders,
+price band stacks to a column with its 16px gutter intact, H1 scales to 40px.
+0 `tel:` links missing `data-call-cta`; 9 "Call to order"; 8/8 legal links.
+`tsc` clean · `eslint` clean · `next build` static.
+
+---
+
+## [017] Photography added
+
+Seven supplied images wired in. Three problems had to be solved before any of
+them could ship.
+
+### Problem 1 — 43.6 MB of PNGs
+
+Delivered as PNG (brief asked for JPG), 5.5–9.3 MB each. Converted with sharp
+to progressive mozjpeg, q84, 4:4:4 chroma, capped at 1920px wide (never
+upscaled):
+
+**43.6 MB → 1.01 MB, a 97.7% reduction**, with no visible loss at display size.
+
+### Problem 2 — every image carried the Gemini watermark
+
+All seven had the Gemini four-point sparkle stamped into the bottom-right
+corner. That directly contradicts the "must not look AI generated" requirement
+and is not acceptable on a commercial landing page.
+
+Detection: a per-image high-pass filter picked up scene texture as well as the
+mark, so the mark was isolated by **cross-image consistency** instead — the
+pixel-wise minimum of (original − local blur) across all seven. Content
+highlights do not coincide across seven different scenes; a fixed overlay does.
+That put the mark at ~85–145px from the right edge and ~85–150px from the
+bottom.
+
+First attempt — feathered clone-stamp from adjacent texture — **failed and was
+reverted**. On structured content it left a visible rectangular seam and cut
+straight through a table leg in the hero. Worse than the watermark.
+
+Shipped fix: **crop**. The bottom 215px was removed from six images, clearing
+both the mark and the failed patch including its feathered edge. `og-share` was
+already short, so it was cropped from the right and re-cut to 1.91:1. Verified:
+consistent-overlay pixels went 191 → 3 (isolated noise), then to zero once
+cropped away.
+
+Resulting ratios: hero 2.49:1, plan cards and installation 2.00:1,
+why-fiber 1.76:1, og-share 1.91:1.
+
+### Problem 3 — Next.js 16 deprecated `priority`
+
+Per `node_modules/next/dist/docs/.../image.md`, `priority` is deprecated in v16
+in favour of `preload`, and the docs state that `loading="eager"` plus
+`fetchPriority="high"` is the preferred form in most cases. The hero uses that
+pair. `qualities` also defaults to `[75]` in v16, so quality is left at the
+default rather than adding an allowlist to `next.config.ts`.
+
+### Implementation
+
+Images are **statically imported into `lib/content.ts`**, so the bundler
+supplies intrinsic dimensions and a blur placeholder, and art direction stays in
+the single source of truth alongside pricing. `PlanItem` gained optional
+`image` / `imageAlt`.
+
+| Slot | Placement |
+| ---- | --------- |
+| `hero-background` | Full-bleed backdrop, `fill`, eager + high fetch priority |
+| `plan-1gig/3gig/8gig` | 2:1 band at the foot of each fiber card, full-bleed via negative margins, 1.04× zoom on card hover |
+| `why-fiber` | Section backdrop at 25% opacity under a charcoal gradient — texture, not subject |
+| `installation` | 3:2 rounded panel in the How It Works column |
+| `og-share` | OpenGraph + Twitter `summary_large_image` |
+
+Bundle cards deliberately inherit **no** image — `composeBundle()` omits the
+field — so each photograph appears once rather than twice on the page.
+
+Alt text: the two decorative backdrops carry `alt=""` so screen readers skip
+them; the four meaningful images carry descriptions.
+
+`metadataBase` added to `app/layout.tsx`, reading `NEXT_PUBLIC_SITE_URL` with a
+placeholder fallback. Without it Next advertised the share image as a
+`localhost:3000` URL, which no social crawler can resolve.
+
+### Verified
+
+- All 7 optimize and serve 200 at every requested width; the optimizer returns
+  the full source at `w=3840` and never upscales.
+- 6 `<img>` elements present in the SSR HTML with correct alt text.
+- 320px: 0px horizontal overflow, zero non-decorative offenders, photo band
+  flush inside the card border.
+- `tsc` clean · `eslint` clean · `next build` static and now warning-free.
+
+### Known limitation
+
+Hero source is 1376×553. Because the hero container is roughly 1.78:1 and the
+image is 2.49:1, `object-cover` scales it ~1.45× to fill, so on a high-DPR
+display the backdrop is soft. It sits under a 50–92% white scrim and reads as
+texture, so this is acceptable as shipped — but a re-render at ≥2400px wide
+would make it crisp.
+
+---
+
+## [018] Hero scrim removed; offer promoted; two sections rebuilt
+
+### Hero backdrop scrim removed
+
+The white gradient over the hero photograph is gone. Only a 7rem fade remains at
+the very bottom so the section edge meets the next one cleanly.
+
+**This broke text contrast, and the fix was to darken the text rather than put
+the scrim back.** Measured against the actual photograph by sampling the
+rendered pixels behind the subline:
+
+| Element  | Colour  | Before | After |
+| -------- | ------- | ------ | ----- |
+| Headline | `#202124` | 8.89:1 | 8.89:1 (unchanged, already passing) |
+| Subline  | `#5F6368` → `#3C4043` | **3.34:1 — failed AA** | **5.74:1 — passes** |
+
+A new token `--color-gf-slate-dark: #3C4043` (Google grey 800) was added for
+body text sitting over photography. Both hero text elements also carry a faint
+white text-shadow for edge definition against the image — that is an outline on
+the glyphs, not a layer over the picture.
+
+### Offer given real prominence
+
+`hero.promoHighlight` was a quiet line in the price band footer. It is replaced
+by a dedicated `offer` object in `lib/content.ts` (`badge`, `headline`,
+`detail`) rendered as a solid `#008064` bar across the **top** of the price
+band, with a badge and the headline in white. The terms stay in the tinted row
+beneath the lockup.
+
+`hero.promoHighlight` was deleted rather than left unused — dead data invites
+someone to edit it and wonder why nothing changes.
+
+### Plan photography moved to the top of the card
+
+Images now lead each card instead of closing it. Giving the card a subject
+before it gives a number is what stops a pricing grid reading as a spreadsheet.
+The tier accent bar gained `z-10` so it still renders above the photograph,
+which creates its own stacking context once it sits first.
+
+The wide (single-plan) card variant now supports an image too, as a 3:1 banner.
+
+### Why Fiber rebuilt
+
+Four equal icon tiles is the most over-used section pattern on the web. Replaced
+with an editorial layout: the fiber macro is now a real captioned `<figure>` on
+the left, and the four points run as a numbered `01–04` list separated by
+hairlines on the right. **Zero card boxes remain** — verified in the DOM.
+
+### How It Works rebuilt
+
+Deliberately given a different shape from Why Fiber so the two never read as the
+same block twice. Heading sits beside the installation photograph, then the
+three steps run left-to-right along a hairline rule with `01–03` markers, and
+the section closes on a CTA row carrying the agent hours.
+
+### Headline, third revision
+
+`Pure fiber. Symmetrical speed. Fixed pricing.` →
+**`Multi-gigabit fiber internet, direct to your home.`**
+("pure" and "fixed" ruled out by the operator.)
+
+Fine-print heading: `Transparent pricing, itemized` →
+**`Equipment, fees and inclusions`**.
+
+### Still outstanding
+
+The Home Phone card has no photograph — no such file was supplied. The slot is
+wired and renders nothing rather than a placeholder, so dropping
+`public/images/plan-phone.jpg` in and adding the import is all that is needed. A
+prompt for it is appended to `IMAGE-BRIEF.md` as image 8 (3:1 banner, landline
+handset rather than a mobile, since the product is a home line).
+
+### Verified
+
+- Hero subline 5.74:1 against the live photograph, scrim confirmed absent.
+- All three fiber cards: image above the title, full-bleed, CTA below.
+- Why Fiber: figure + caption, items `01–04`, 0 card boxes.
+- How It Works: 3-column flow, steps `01–03`, connecting rule, closing CTA.
+- Offer bar stacks to a column at 320px and fits the viewport.
+- 320px: 0px horizontal overflow, zero non-decorative offenders, card image
+  flush inside the card border.
+- `tsc` clean · `eslint` clean · `next build` static and warning-free.
+
+---
+
+## [019] Home Phone photography added
+
+`plan-phone.png` supplied (1376×768, 2.0 MB). Same three-step treatment as the
+first batch:
+
+1. **Watermark** — carried the Gemini sparkle at ~123px from the right and
+   ~133px from the bottom, consistent with the other seven. Removed by the same
+   215px bottom crop.
+2. **Format** — PNG → progressive mozjpeg q84. **2.0 MB → 108 KB, 95% smaller.**
+3. **Result** — 1376×553 (2.49:1).
+
+A note on the detector: the automated check reported ~8,500 "hard-edge bright"
+pixels in the cropped corner, which looks like a failure but is not. That corner
+is a fruit bowl and a utensil pot — high-contrast edges the filter cannot tell
+from an overlay. Confirmed clean by eye instead. The cross-image consistency
+method used on the first batch does not apply to a single image.
+
+**Content check:** the frame shows a cordless **landline** handset with its base
+station on the counter, which is what the product actually is. A smartphone
+would have misrepresented it. No logos, no readable text, no router in shot.
+
+**Wiring:** statically imported into `lib/content.ts` and attached to the
+`gfiber-phone` plan as `image` / `imageAlt`. No component changed — the wide
+card already carried the slot from entry [018].
+
+**Mobile fix:** the wide banner is 3:1, which at a 320px viewport is only ~96px
+tall and cuts the subject's face out entirely. Changed to
+`aspect-[16/9] sm:aspect-[3/1]`, giving 286×161 at 320px and the intended 3:1
+from `sm` upward.
+
+**Verified:** serves 200 at every width, full 1376×553 returned at `w=1920`;
+7 `<img>` elements in the SSR HTML; the card's 3:1 crop window (y=47..506)
+frames the subject's face at 18–57% of the band; 320px shows 0px horizontal
+overflow and zero non-decorative offenders. `tsc` clean · `eslint` clean ·
+`next build` static and warning-free.
+
+**Image set complete — all 8 slots filled, 832 KB total.**
+
+---
+
+## [020] Hero re-lit; ambient motion added across the site
+
+The operator's note was that the hero read dull, the headline had no weight and
+the photograph was not really visible. Three separate causes.
+
+> **Brief change.** Entry [002] set a deliberately small motion budget. The
+> operator has since asked for vibrant animated gradient backgrounds, so that
+> constraint is superseded. The still-standing exclusions from the original
+> brief — no WebGL, no 3D spirals, no animated assembly diagrams — are intact.
+
+### 1. The photograph was flat, not dark
+
+Measured: channel stdev ~58–66 on a 0–255 range, which is a genuinely
+low-contrast frame. Graded with sharp — saturation ×1.42, linear contrast
+1.22x−26, gamma 1.05, light sharpen. Stdev now 66–76 and the greens and wood
+read properly. 82 KB → 109 KB. Ungraded originals are backed up in the session
+scratchpad.
+
+### 2. The scrim was doing the damage
+
+Entry [018] removed the white scrim, but the rebuild reintroduced one as a
+"bloom" at `rgba(255,255,255,0.78)` over the centre — the same mistake wearing a
+different name. Cut to `0.30`, at which point the room is clearly legible.
+
+### 3. The headline had no weight
+
+Now `font-bold` at up to 4.25rem with tighter `-0.04em` tracking, and the
+closing phrase carries a brand-teal gradient. The headline is stored in
+`lib/content.ts` as `headlineLead` + `headlineAccent`, with `headline` derived
+from both so metadata keeps the full string.
+
+**Two real bugs found and fixed while doing this:**
+
+- **`text-shadow` bleeds through `bg-clip-text`.** The white glow painted behind
+  the glyphs shows straight through the transparent fill, washing the gradient
+  to a pale mint. Switched to `drop-shadow`, which respects the alpha mask.
+- **The gradient failed contrast.** Its light stop `#008064` measured
+  **2.52:1** against the photograph — below even the 3:1 large-text minimum.
+  Regraded to run `#004A3C → #005D4A → #004A3C`; the lightest stop now measures
+  **4.01:1**, clearing the normal-text threshold, not just the large-text one.
+
+Final measured contrast over the live photograph: headline **8.20:1**,
+accent **4.01:1**, subline **6.03:1**.
+
+### Ambient motion
+
+`components/AuroraBackdrop.tsx` — two or three large blurred blobs in the tier
+accents (`#00BE8E`, `#FF7321`, `#FF72FC`) drifting on independent 22/28/34s
+loops, in `light`, `vivid` and `dark` intensities. Applied to all eight
+sections.
+
+Also added: a 30s Ken Burns push-in on the hero photograph, a 12s hue pan on the
+teal→orange→magenta brand rules, a shimmer sweep across the offer bar, and a
+pulse ring on the eyebrow dot.
+
+**Performance shape:** only `transform` and `background-position` animate, so
+blurred layers rasterise once and are then moved by the compositor rather than
+re-blurred each frame. Blur radius is 56px and the `light` variant uses two
+blobs rather than three, taking the page from 24 blurred layers to 18.
+
+`contain: paint` was tried on the blobs and **removed** — it clips painting to
+the element box, which would cut the blur halo off at a hard edge.
+
+Everything stops under `prefers-reduced-motion: reduce`; the guard was confirmed
+present in the live CSSOM covering all seven animated classes.
+
+### Verified
+
+- 24 animations running, all in `running` state; aurora present on all 8 sections.
+- Reduced-motion guard found in the served stylesheet.
+- 320px: `documentScrollWidth` 320, 0px overflow, cannot scroll sideways, and
+  zero overflowing text or controls once elements safely clipped by an
+  `overflow:hidden` ancestor are excluded.
+- `tsc` clean · `eslint` clean · `next build` static and warning-free.
+
+### Not verified
+
+Frame rate under animation could not be measured — `requestAnimationFrame` is
+throttled while the preview pane is hidden, so the probe never returned. The
+design is transform-only for this reason, but an FPS reading on a real device
+has not been taken.
+
+---
+
+## [021] Fiber-flow background and headline motion
+
+### `components/FiberFlow.tsx`
+
+Light travelling along fiber strands — the one background motif that is
+literally the product rather than generic decoration.
+
+Four curved paths drawn twice each: a faint static strand, and over it a heavily
+dashed stroke whose `stroke-dashoffset` animates, so a single lit segment runs
+the length of the curve. Dash pattern is `230 <pathLength>`, so exactly one
+pulse occupies a strand at a time. Speeds 9/11/13/15s with staggered delays, in
+`#00BE8E`, `#00D699`, `#FF7321` and `#FF72FC`, through an SVG Gaussian-blur glow
+filter. Five junction nodes blip on their own 3.2–5.1s cycles.
+
+**Two fixes during tuning:**
+
+- `preserveAspectRatio="xMidYMid slice"` cropped to roughly the middle 50% of
+  the composition on a tall hero, hiding most of the strands. Changed to `none`
+  — these are abstract curves, so stretching costs nothing and keeps them all on
+  screen.
+- Strands were invisible over the photograph at the first settings. Static
+  opacity 0.16 → 0.28, pulse dash 120 → 230, stroke +0.5, layer opacity
+  0.7 → 0.9, plus `vectorEffect="non-scaling-stroke"` so the stretch does not
+  thin the lines.
+
+### Headline
+
+- **Colour flow** — the accent phrase is filled with a five-stop gradient at
+  `background-size: 230%`, panning on a 9s cycle.
+- **Glow** — a breathing teal bloom behind the headline on a 7s cycle. It sits
+  *behind* the glyphs, so it adds light without touching text contrast, and is
+  ordered before the `<h1>` at default z-index; a negative z-index dropped it
+  behind the photograph instead.
+
+**Contrast under animation.** Because the fill now moves, every stop has to
+hold, not just one. Measured against the live photograph:
+
+| Stop | Ratio |
+| ---- | ----- |
+| `#00604E` (lightest) | 3.85:1 |
+| `#005D4A` | 4.02:1 |
+| `#004A3C` | 5.24:1 |
+
+All clear the 3:1 large-text minimum at 68px/700, and the two darker stops clear
+4.5:1 outright. Headline 8.21:1, subline 6.03:1.
+
+A brighter "shine" band sweeping through the text was tried and **rejected** —
+it dropped glyphs to roughly 2.5:1 as it passed. The glow behind the text gives
+the same impression without the contrast cost.
+
+### Verified
+
+39 animations running; fiber SVG present with 4 flow paths; reduced-motion guard
+extended to `.gf-flow`, `.gf-node`, `.gf-text-flow` and `.gf-breathe`, with
+`.gf-flow` pinned to `stroke-dashoffset: 0` so a lit segment stays visible
+rather than leaving a bare line. 320px: 0px horizontal overflow, no sideways
+scroll, zero overflowing content. `tsc` clean · `eslint` clean · `next build`
+static and warning-free.
