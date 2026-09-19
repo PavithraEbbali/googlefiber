@@ -901,3 +901,65 @@ Turbopack's CSS parser inspects the file before PostCSS hands it to Tailwind v4,
 which owns that at-rule. Verified non-functional by confirming the compiled
 stylesheet contains every brand token, all five keyframe sets, the three
 reduced-motion guards and the 767px mobile guard. No action taken.
+
+---
+
+## [023] Deployment broke — restoring build config deleted in [022]
+
+The Vercel deployment rendered with **no CSS at all**: an unconstrained logo SVG
+filling the viewport, its `fill-gf-teal` rect falling back to black.
+
+### Cause — self-inflicted
+
+The cleanup in [022] removed scratch files with this glob:
+
+```
+rm -f ... zoom.jpg opt_*.img t.img *.mjs
+```
+
+`*.mjs` was meant for the throwaway image scripts. It also matched
+**`postcss.config.mjs`** and **`eslint.config.mjs`**, the two root config files.
+Without the PostCSS config, Tailwind never runs, so the build emits no
+stylesheet — and because the deletion happened before `git add`, the broken
+state was what got pushed.
+
+### Why it was not caught
+
+Two compounding verification failures, both mine:
+
+1. **Verified the wrong artifact.** The check for brand tokens and keyframes ran
+   against `.next/dev/static/...` — development output, and stale output at
+   that, generated before the deletion. The production bundle in `.next/static`
+   was never inspected. Dev kept serving cached CSS, so the local site looked
+   fine throughout.
+2. **Dismissed the actual signal.** `next build` reported
+   `Unknown at rule: @theme` and this was written off as a cosmetic Turbopack
+   parser quirk. It was not. Turbopack saw a raw `@theme` because Tailwind had
+   never processed the file — the warning *was* the bug reporting itself. It
+   disappeared the moment the PostCSS config was restored.
+
+A third, smaller issue: lint checks had been running as
+`npx eslint . --ext .ts,.tsx | tail -5 && echo "LINT OK"`. Piping into `tail`
+makes the pipeline exit status that of `tail`, so "LINT OK" printed
+unconditionally — and `--ext` is not valid in ESLint 9 flat config anyway. Those
+runs proved nothing.
+
+### Fix
+
+- `postcss.config.mjs` restored.
+- `eslint.config.mjs` rewritten. The first restoration attempt used `FlatCompat`
+  and crashed with a circular-reference error; `eslint-config-next@16` ships
+  native flat configs, so it now imports `eslint-config-next/core-web-vitals`
+  and `eslint-config-next/typescript` directly.
+
+### Verified against the production build this time
+
+- `.next/static/chunks/*.css` — **53,959 bytes** (previously absent).
+- All nine brand tokens present; `bg-gf-teal`, `fill-gf-teal`,
+  `text-gf-charcoal`, `gf-display`, `gf-eyebrow`, `min-h-11` all generated.
+- All seven keyframe sets, the reduced-motion guard and the 767px mobile guard
+  present.
+- `next build` now emits **no warnings**.
+- Served the production build with `next start` and confirmed the stylesheet is
+  linked in the HTML, returns 200, and the page renders correctly.
+- `eslint` exit code 0 with the status no longer masked by a pipe; `tsc` exit 0.
